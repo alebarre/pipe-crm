@@ -42,35 +42,61 @@ Mude `createLeadSchema` e o TypeScript quebra no formulário. Esse é o ponto.
 
 Requisitos: **Node 22+** e **pnpm** (`corepack enable pnpm`).
 
+Escolha um dos dois modos de banco. **O código da aplicação é idêntico nos dois** — mesmo dialeto, mesmas migrations, mesmo schema Drizzle. Só muda o driver, decidido pela `DATABASE_URL`.
+
+### Opção A — Postgres em Docker (o modo de verdade)
+
+É o que espelha produção. Requer Docker.
+
 ```bash
 pnpm install
-cp .env.example .env      # ja vem apontando para o modo sem Docker
+cp .env.example .env
+```
+
+Edite o `.env` e troque a linha do banco:
+
+```diff
+- DATABASE_URL=pglite://.pgdata
++ DATABASE_URL=postgres://pipe:pipe@localhost:5432/pipe_crm
+```
+
+Então suba o container e prepare o banco:
+
+```bash
+pnpm db:up        # sobe o postgres:17 e espera ficar saudavel
 pnpm db:migrate
 pnpm db:seed
 pnpm dev
 ```
 
+Para derrubar depois: `pnpm db:down` (ou `pnpm db:reset` para apagar o volume e começar do zero).
+
+> Se der `permission denied` no socket do Docker, seu usuário não está no grupo `docker`:
+> `sudo usermod -aG docker $USER` e faça logout/login. Enquanto isso, use a Opção B.
+
+### Opção B — sem infraestrutura nenhuma
+
+Usa **PGlite**: o próprio Postgres compilado para WASM, rodando dentro do processo Node. Não precisa de Docker nem de serviço rodando. É o padrão do `.env.example`.
+
+```bash
+pnpm install
+cp .env.example .env      # ja vem com DATABASE_URL=pglite://.pgdata
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+Os dados ficam em `.pgdata/` na raiz do projeto (ignorado pelo git). Para zerar, basta apagar a pasta e rodar `db:migrate` e `db:seed` de novo.
+
+> **Um processo por vez sobre o mesmo `.pgdata`.** O PGlite não é um servidor: cada processo abre o diretório de dados diretamente. Rodar o seed com a API no ar normalmente *não* dá erro — e é exatamente por isso que é arriscado, já que nada avisa sobre escrita concorrente. Pare a API antes de `db:seed`. Produção usa sempre `postgres://`, que não tem essa limitação.
+
+### Depois de subir
+
 - Front: <http://localhost:5173>
 - API: <http://localhost:3333>
 - OpenAPI (gerado dos schemas Zod): <http://localhost:3333/docs>
 
-### Banco: dois modos
-
-O `.env.example` vem com **PGlite** — o próprio Postgres compilado para WASM, sem infraestrutura nenhuma:
-
-```
-DATABASE_URL=pglite://.pgdata
-```
-
-Para usar Postgres de verdade em container, troque para:
-
-```
-DATABASE_URL=postgres://pipe:pipe@localhost:5432/pipe_crm
-```
-
-e rode `pnpm db:up` antes das migrations. Mesmo dialeto, mesmas migrations, mesmo código de aplicação — só muda o driver.
-
-> **Um processo por vez sobre o mesmo `.pgdata`.** O PGlite não é um servidor: cada processo abre o diretório de dados diretamente. Rodar o seed com a API no ar normalmente *não* dá erro — e é exatamente por isso que é arriscado, já que nada avisa sobre escrita concorrente. Pare a API antes de `db:seed`. Produção usa sempre `postgres://`, que não tem essa limitação.
+Se a porta 3333 ou 5173 estiver ocupada, o `pnpm dev` falha com `EADDRINUSE` — normalmente é uma instância antiga ainda rodando. Descubra quem está segurando com `ss -ltnp | grep -E ':3333|:5173'`.
 
 ---
 
