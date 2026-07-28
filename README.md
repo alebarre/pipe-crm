@@ -100,6 +100,56 @@ Se a porta 3333 ou 5173 estiver ocupada, o `pnpm dev` falha com `EADDRINUSE` —
 
 ---
 
+## Arquitetura de execução
+
+`pnpm dev` sobe **dois processos Node independentes**:
+
+```
+┌─ processo 1 ────────────────────┐     ┌─ processo 2 ──────────────────┐
+│  tsx watch src/server.ts        │     │  vite                         │
+│  = O BACKEND                    │     │  ≠ o frontend                 │
+│  Fastify escutando :3333        │     │  servidor de arquivos :5173   │
+│  executa apps/api/              │     │  compila e entrega o bundle   │
+└─────────────────────────────────┘     └───────────────────────────────┘
+```
+
+O Vite é um processo Node, mas **não executa** o código React — ele compila `apps/web/` e entrega os arquivos por HTTP. Quem executa o React é o navegador. Nada de `apps/web` roda no servidor; é justamente por isso que esta stack não tem SSR.
+
+| Código | Onde executa |
+|---|---|
+| `apps/api/**` | processo Node na porta 3333 — **o backend** |
+| `apps/web/**` | navegador do usuário |
+| `packages/shared/**` | nos **dois** — mesmo arquivo importado dos dois lados |
+| `packages/db/**` | só no processo da API |
+
+### Por que tudo parece estar na 5173
+
+O navegador nunca fala com a 3333 diretamente. Um `fetch('/api/leads')` sai para a 5173 e o Vite repassa:
+
+```
+navegador ──GET /api/leads──> Vite :5173 ──proxy──> Fastify :3333 ──> banco
+```
+
+É de propósito: elimina CORS e cookie cross-site em desenvolvimento.
+
+### Onde fica o banco
+
+- **PGlite (Opção B):** não existe processo de banco. O Postgres em WASM roda **dentro do próprio processo da API**, sobre a pasta `.pgdata/`. Daí a regra de um processo por vez.
+- **Docker (Opção A):** um terceiro processo — container `postgres:17` na porta 5432, acessado por TCP.
+
+### Em produção
+
+Os dois viram artefatos de natureza diferente:
+
+| | Build | O que se publica |
+|---|---|---|
+| Backend | `apps/api/dist/server.js` | `node dist/server.js` num servidor ou container |
+| Frontend | `apps/web/dist/` | HTML/CSS/JS estáticos num CDN ou nginx |
+
+O Vite deixa de existir — é ferramenta de desenvolvimento. Como o proxy some junto, é aí que os dois precisam ser servidos sob o mesmo domínio (ou o CORS configurado de verdade).
+
+---
+
 ## Estrutura
 
 ```
