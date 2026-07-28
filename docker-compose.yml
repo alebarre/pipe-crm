@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: pipe-crm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pipe
+      POSTGRES_PASSWORD: pipe
+      POSTGRES_DB: pipe_crm
+    ports:
+      - '5432:5432'
+    volumes:
+      - pipe-crm-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pipe -d pipe_crm']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pipe-crm-data:

@@ -1,0 +1,15 @@
+{
+  "configurations": [
+    {
+      "name": "Containers: Node.js Launch",
+      "type": "docker",
+      "request": "launch",
+      "preLaunchTask": "docker-run: debug",
+      "platform": "node",
+      "node": {
+        "package": "${workspaceFolder}/node_modules/.pnpm/prettier@3.9.6/node_modules/prettier/package.json",
+        "localRoot": "${workspaceFolder}/node_modules/.pnpm/prettier@3.9.6/node_modules/prettier"
+      }
+    }
+  ]
+}

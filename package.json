@@ -1,0 +1,30 @@
+{
+  "name": "pipe-crm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:up": "docker compose -f docker-compose.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.yml down",
+    "db:reset": "docker compose -f docker-compose.yml down -v && pnpm db:up",
+    "db:generate": "pnpm --filter @pipe/db generate",
+    "db:migrate": "pnpm --filter @pipe/db migrate",
+    "db:seed": "pnpm --filter @pipe/db seed",
+    "db:studio": "pnpm --filter @pipe/db studio",
+    "setup": "pnpm db:up && pnpm db:migrate && pnpm db:seed"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.0",
+    "typescript": "^5.9.0"
+  }
+}

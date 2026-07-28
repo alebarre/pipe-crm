@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-surface: oklch(99% 0.003 250);
+  --color-surface-raised: oklch(100% 0 0);
+  --color-line: oklch(92% 0.006 250);
+  --color-ink: oklch(24% 0.02 260);
+  --color-ink-muted: oklch(52% 0.015 260);
+  --color-brand: oklch(55% 0.16 258);
+  --color-brand-soft: oklch(96% 0.02 258);
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-surface: oklch(19% 0.012 260);
+      --color-surface-raised: oklch(23% 0.014 260);
+      --color-line: oklch(31% 0.014 260);
+      --color-ink: oklch(95% 0.006 260);
+      --color-ink-muted: oklch(70% 0.014 260);
+      --color-brand: oklch(72% 0.13 258);
+      --color-brand-soft: oklch(28% 0.04 258);
+    }
+  }
+}

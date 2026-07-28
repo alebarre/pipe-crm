@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm >=10 bloqueia scripts de postinstall por padrao. Estes precisam rodar
+# para baixar/compilar seus binarios nativos.
+allowBuilds:
+  esbuild: true
+  '@biomejs/biome': true
+  '@tailwindcss/oxide': true
