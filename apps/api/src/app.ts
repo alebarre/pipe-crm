@@ -23,6 +23,27 @@ export async function buildApp() {
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
 
+  // Clientes HTTP costumam mandar `content-type: application/json` em toda
+  // requisicao, inclusive nas que nao tem corpo (DELETE). O parser padrao do
+  // Fastify rejeita isso com 400 "Body cannot be empty when content-type is
+  // set to 'application/json'". Aqui, corpo vazio vira simplesmente undefined.
+  app.addContentTypeParser<string>(
+    'application/json',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      if (body.trim() === '') return done(null, undefined)
+      try {
+        done(null, JSON.parse(body))
+      } catch {
+        const error = Object.assign(new Error('Corpo da requisicao nao e um JSON valido.'), {
+          statusCode: 400,
+          name: 'Bad Request',
+        })
+        done(error, undefined)
+      }
+    },
+  )
+
   /* ------------------------------------------------------------------ */
   /* Tratamento de erro                                                 */
   /*                                                                    */

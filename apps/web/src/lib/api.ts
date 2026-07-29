@@ -38,7 +38,13 @@ const BASE_URL = '/api'
 async function call<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers: {
+      // Só declara o tipo do corpo quando existe corpo. Mandar
+      // `content-type: application/json` num DELETE sem body faz o Fastify
+      // responder 400 ("Body cannot be empty when content-type is set...").
+      ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...init?.headers,
+    },
   })
 
   const payload = response.status === 204 ? null : await response.json().catch(() => null)

@@ -61,10 +61,17 @@ export function useUpdateLead(id: string) {
 }
 
 export function useDeleteLead() {
-  const invalidate = useInvalidateLeads()
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api.deleteLead(id),
-    onSuccess: invalidate,
+    onSuccess: async (_result, id) => {
+      // Remocao e o unico caso que nao pode simplesmente invalidar tudo:
+      // revalidar a query do lead recem-apagado so produziria um 404.
+      // Ela sai do cache; o resto revalida normalmente.
+      queryClient.removeQueries({ queryKey: leadKeys.detail(id) })
+      await queryClient.invalidateQueries({ queryKey: leadKeys.lists() })
+      await queryClient.invalidateQueries({ queryKey: leadKeys.stats() })
+    },
   })
 }
 

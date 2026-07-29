@@ -173,6 +173,22 @@ describe('ciclo de vida do lead', () => {
     })
   })
 
+  it('aceita DELETE com content-type json e corpo vazio', async () => {
+    // O `fetch` do navegador manda content-type em toda requisicao. Sem um
+    // parser tolerante, o Fastify responde 400 "Body cannot be empty when
+    // content-type is set to 'application/json'" e o botao Remover nao funciona.
+    const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
+    const { id } = criado.json()
+
+    const removido = await app.inject({
+      method: 'DELETE',
+      url: `/api/leads/${id}`,
+      headers: { 'content-type': 'application/json' },
+    })
+
+    expect(removido.statusCode).toBe(204)
+  })
+
   it('devolve 400 para id que nao e uuid', async () => {
     const response = await app.inject({ url: '/api/leads/nao-e-uuid' })
 
