@@ -4,9 +4,9 @@ services:
     container_name: pipe-crm-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: pipe
-      POSTGRES_PASSWORD: pipe
-      POSTGRES_DB: pipe_crm
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - '5432:5432'
     volumes:
