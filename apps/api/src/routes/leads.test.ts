@@ -1,15 +1,21 @@
 import { closeDb, db, leads } from '@pipe/db'
 import { runMigrations } from '@pipe/db/migrate'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, InjectOptions } from 'fastify'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
+import { ADMIN, createUserAndSignIn, type Session, USER } from '../test/auth-helpers.ts'
 
 let app: FastifyInstance
+let admin: Session
+let user: Session
 
 beforeAll(async () => {
   await runMigrations()
   app = await buildApp()
   await app.ready()
+
+  admin = await createUserAndSignIn(app, { ...ADMIN, role: 'admin' })
+  user = await createUserAndSignIn(app, { ...USER, role: 'user' })
 })
 
 beforeEach(async () => {
@@ -21,8 +27,16 @@ afterAll(async () => {
   await closeDb()
 })
 
-const criar = (body: Record<string, unknown>) =>
-  app.inject({ method: 'POST', url: '/api/leads', payload: body })
+/**
+ * Toda rota de /leads exige sessao. Os casos abaixo tratam do dominio, entao o
+ * padrao e entrar como admin; `null` faz a requisicao sair sem cookie nenhum,
+ * e a sessao de `user` serve aos casos de autorizacao no fim do arquivo.
+ */
+const inject = (options: InjectOptions, session: Session | null = admin) =>
+  app.inject(session ? { ...options, cookies: session.cookies } : options)
+
+const criar = (body: Record<string, unknown>, session: Session | null = admin) =>
+  inject({ method: 'POST', url: '/api/leads', payload: body }, session)
 
 describe('POST /api/leads', () => {
   it('cria um lead com os defaults do schema', async () => {
@@ -94,21 +108,21 @@ describe('GET /api/leads', () => {
   })
 
   it('filtra por status', async () => {
-    const response = await app.inject({ url: '/api/leads?status=won' })
+    const response = await inject({ url: '/api/leads?status=won' })
 
     expect(response.statusCode).toBe(200)
     expect(response.json().meta.total).toBe(2)
   })
 
   it('busca por nome, e-mail ou empresa', async () => {
-    const response = await app.inject({ url: '/api/leads?q=northwind' })
+    const response = await inject({ url: '/api/leads?q=northwind' })
 
     expect(response.json().data).toHaveLength(1)
     expect(response.json().data[0].name).toBe('Bruno Lima')
   })
 
   it('ordena e pagina', async () => {
-    const response = await app.inject({ url: '/api/leads?sort=valueCents&order=desc&perPage=2' })
+    const response = await inject({ url: '/api/leads?sort=valueCents&order=desc&perPage=2' })
 
     const body = response.json()
     expect(body.data.map((lead: { valueCents: number }) => lead.valueCents)).toEqual([30000, 5000])
@@ -116,7 +130,7 @@ describe('GET /api/leads', () => {
   })
 
   it('rejeita filtro fora do enum', async () => {
-    const response = await app.inject({ url: '/api/leads?status=inexistente' })
+    const response = await inject({ url: '/api/leads?status=inexistente' })
 
     expect(response.statusCode).toBe(400)
   })
@@ -127,27 +141,27 @@ describe('ciclo de vida do lead', () => {
     const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
     const { id } = criado.json()
 
-    const interacao = await app.inject({
+    const interacao = await inject({
       method: 'POST',
       url: `/api/leads/${id}/interactions`,
       payload: { type: 'call', content: 'Primeira conversa' },
     })
     expect(interacao.statusCode).toBe(201)
 
-    const detalhe = await app.inject({ url: `/api/leads/${id}` })
+    const detalhe = await inject({ url: `/api/leads/${id}` })
     expect(detalhe.json().interactions).toHaveLength(1)
 
-    const atualizado = await app.inject({
+    const atualizado = await inject({
       method: 'PATCH',
       url: `/api/leads/${id}`,
       payload: { status: 'won', valueCents: 123456 },
     })
     expect(atualizado.json()).toMatchObject({ status: 'won', valueCents: 123456 })
 
-    const removido = await app.inject({ method: 'DELETE', url: `/api/leads/${id}` })
+    const removido = await inject({ method: 'DELETE', url: `/api/leads/${id}` })
     expect(removido.statusCode).toBe(204)
 
-    const depois = await app.inject({ url: `/api/leads/${id}` })
+    const depois = await inject({ url: `/api/leads/${id}` })
     expect(depois.statusCode).toBe(404)
   })
 
@@ -160,7 +174,7 @@ describe('ciclo de vida do lead', () => {
     })
     const { id } = criado.json()
 
-    const atualizado = await app.inject({
+    const atualizado = await inject({
       method: 'PATCH',
       url: `/api/leads/${id}`,
       payload: { status: 'won' },
@@ -180,7 +194,7 @@ describe('ciclo de vida do lead', () => {
     const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
     const { id } = criado.json()
 
-    const removido = await app.inject({
+    const removido = await inject({
       method: 'DELETE',
       url: `/api/leads/${id}`,
       headers: { 'content-type': 'application/json' },
@@ -190,7 +204,7 @@ describe('ciclo de vida do lead', () => {
   })
 
   it('devolve 400 para id que nao e uuid', async () => {
-    const response = await app.inject({ url: '/api/leads/nao-e-uuid' })
+    const response = await inject({ url: '/api/leads/nao-e-uuid' })
 
     expect(response.statusCode).toBe(400)
   })
@@ -201,7 +215,7 @@ describe('GET /api/leads/stats', () => {
     await criar({ name: 'Ana Souza', email: 'ana@acme.com', status: 'won', valueCents: 10000 })
     await criar({ name: 'Bruno Lima', email: 'bruno@acme.com', status: 'new', valueCents: 2000 })
 
-    const stats = (await app.inject({ url: '/api/leads/stats' })).json()
+    const stats = (await inject({ url: '/api/leads/stats' })).json()
 
     expect(stats.total).toBe(2)
     expect(stats.wonValueCents).toBe(10000)
@@ -211,5 +225,84 @@ describe('GET /api/leads/stats', () => {
       count: 0,
       valueCents: 0,
     })
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Autorizacao                                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('sem sessao', () => {
+  const semSessao = (options: InjectOptions) => inject(options, null)
+
+  it.each([
+    ['GET', '/api/leads'],
+    ['GET', '/api/leads/stats'],
+    ['GET', '/api/leads/00000000-0000-4000-8000-000000000000'],
+    ['POST', '/api/leads'],
+    ['PATCH', '/api/leads/00000000-0000-4000-8000-000000000000'],
+    ['DELETE', '/api/leads/00000000-0000-4000-8000-000000000000'],
+    ['POST', '/api/leads/00000000-0000-4000-8000-000000000000/interactions'],
+  ])('%s %s responde 401', async (method, url) => {
+    const response = await semSessao({ method: method as InjectOptions['method'], url })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  it('recusa access token adulterado', async () => {
+    const response = await app.inject({
+      url: '/api/leads',
+      cookies: { pipe_at: 'nao.e.um.jwt' },
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+})
+
+describe('papel "user"', () => {
+  it('le a listagem, o detalhe e as metricas', async () => {
+    const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
+    const { id } = criado.json()
+
+    expect((await inject({ url: '/api/leads' }, user)).statusCode).toBe(200)
+    expect((await inject({ url: '/api/leads/stats' }, user)).statusCode).toBe(200)
+    expect((await inject({ url: `/api/leads/${id}` }, user)).statusCode).toBe(200)
+  })
+
+  it('registra interacao na timeline', async () => {
+    const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
+    const { id } = criado.json()
+
+    const response = await inject(
+      {
+        method: 'POST',
+        url: `/api/leads/${id}/interactions`,
+        payload: { type: 'note', content: 'Cliente pediu retorno na sexta' },
+      },
+      user,
+    )
+
+    expect(response.statusCode).toBe(201)
+  })
+
+  it('nao cria, nao atualiza e nao remove lead', async () => {
+    const criado = await criar({ name: 'Ana Souza', email: 'ana@acme.com' })
+    const { id } = criado.json()
+
+    const criacao = await criar({ name: 'Bruno Lima', email: 'bruno@acme.com' }, user)
+    expect(criacao.statusCode).toBe(403)
+
+    const atualizacao = await inject(
+      { method: 'PATCH', url: `/api/leads/${id}`, payload: { status: 'won' } },
+      user,
+    )
+    expect(atualizacao.statusCode).toBe(403)
+
+    const remocao = await inject({ method: 'DELETE', url: `/api/leads/${id}` }, user)
+    expect(remocao.statusCode).toBe(403)
+
+    // E o 403 nao foi so na resposta: o lead continua intacto.
+    const depois = await inject({ url: `/api/leads/${id}` })
+    expect(depois.json()).toMatchObject({ name: 'Ana Souza', status: 'new' })
   })
 })

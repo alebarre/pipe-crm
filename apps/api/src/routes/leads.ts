@@ -29,6 +29,8 @@ import {
 } from '@pipe/shared'
 import type { FastifyInstance } from 'fastify'
 import type { ZodTypeProvider } from 'fastify-type-provider-zod'
+import { z } from 'zod'
+import { authenticate, requireRole } from '../lib/auth.ts'
 import { isUniqueViolation } from '../lib/errors.ts'
 import { toInteraction, toLead } from '../lib/mappers.ts'
 
@@ -41,6 +43,25 @@ const notFound = (message: string) => ({
 /** O schema ja fez o trim; aqui so o vazio vira NULL em vez de string vazia. */
 const clean = (value: string | null | undefined): string | null => value || null
 
+/**
+ * Quem pode o que, neste modulo:
+ *
+ *   admin -> criar, atualizar e excluir lead
+ *   user  -> ler o pipeline e registrar interacao
+ *
+ * `authenticate` sozinho ja e o "qualquer um logado"; onde a operacao muda o
+ * cadastro do lead, entra tambem o `requireRole('admin')`. Os hooks rodam em
+ * ordem e param no primeiro que responder — sem token valido, a checagem de
+ * papel nem chega a acontecer.
+ *
+ * `onRequest`, e nao `preHandler`: o preHandler roda DEPOIS da validacao do
+ * corpo, entao um POST sem sessao e com corpo invalido receberia 400 (com o
+ * detalhe de cada campo) em vez de 401. Alem de errado como resposta, e
+ * trabalho gasto — e um mapa do contrato — para quem nem se identificou.
+ */
+const loggedIn = { onRequest: [authenticate] }
+const adminOnly = { onRequest: [authenticate, requireRole('admin')] }
+
 export async function leadRoutes(app: FastifyInstance) {
   const route = app.withTypeProvider<ZodTypeProvider>()
 
@@ -51,11 +72,12 @@ export async function leadRoutes(app: FastifyInstance) {
   route.get(
     '/leads',
     {
+      ...loggedIn,
       schema: {
         tags: ['leads'],
         summary: 'Lista leads com busca, filtro, ordenacao e paginacao',
         querystring: listLeadsQuerySchema,
-        response: { 200: listLeadsResponseSchema },
+        response: { 200: listLeadsResponseSchema, 401: apiErrorSchema },
       },
     },
     async (request) => {
@@ -112,10 +134,11 @@ export async function leadRoutes(app: FastifyInstance) {
   route.get(
     '/leads/stats',
     {
+      ...loggedIn,
       schema: {
         tags: ['leads'],
         summary: 'Totais do pipeline agrupados por status',
-        response: { 200: leadStatsSchema },
+        response: { 200: leadStatsSchema, 401: apiErrorSchema },
       },
     },
     async () => {
@@ -159,11 +182,12 @@ export async function leadRoutes(app: FastifyInstance) {
   route.get(
     '/leads/:id',
     {
+      ...loggedIn,
       schema: {
         tags: ['leads'],
         summary: 'Detalhe do lead com a timeline de interacoes',
         params: idParamSchema,
-        response: { 200: leadDetailSchema, 404: apiErrorSchema },
+        response: { 200: leadDetailSchema, 401: apiErrorSchema, 404: apiErrorSchema },
       },
     },
     async (request, reply) => {
@@ -192,11 +216,17 @@ export async function leadRoutes(app: FastifyInstance) {
   route.post(
     '/leads',
     {
+      ...adminOnly,
       schema: {
         tags: ['leads'],
-        summary: 'Cria um lead',
+        summary: 'Cria um lead (admin)',
         body: createLeadSchema,
-        response: { 201: leadSchema, 409: apiErrorSchema },
+        response: {
+          201: leadSchema,
+          401: apiErrorSchema,
+          403: apiErrorSchema,
+          409: apiErrorSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -239,14 +269,17 @@ export async function leadRoutes(app: FastifyInstance) {
   route.patch(
     '/leads/:id',
     {
+      ...adminOnly,
       schema: {
         tags: ['leads'],
-        summary: 'Atualiza campos de um lead',
+        summary: 'Atualiza campos de um lead (admin)',
         params: idParamSchema,
         body: updateLeadSchema,
         response: {
           200: leadSchema,
           400: apiErrorSchema,
+          401: apiErrorSchema,
+          403: apiErrorSchema,
           404: apiErrorSchema,
           409: apiErrorSchema,
         },
@@ -302,11 +335,19 @@ export async function leadRoutes(app: FastifyInstance) {
   route.delete(
     '/leads/:id',
     {
+      ...adminOnly,
       schema: {
         tags: ['leads'],
-        summary: 'Remove um lead (as interacoes caem em cascata). 404 se nao existir.',
+        summary: 'Remove um lead, com as interacoes em cascata (admin). 404 se nao existir.',
         params: idParamSchema,
-        // Sem schema de resposta: 204 nao tem corpo para validar.
+        response: {
+          // 204 nao tem corpo — o `z.null()` existe so para o `.code(204)`
+          // continuar valido agora que a rota declara respostas de erro.
+          204: z.null(),
+          401: apiErrorSchema,
+          403: apiErrorSchema,
+          404: apiErrorSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -317,7 +358,7 @@ export async function leadRoutes(app: FastifyInstance) {
 
       if (deleted.length === 0) return reply.code(404).send(notFound('Lead nao encontrado.'))
 
-      return reply.code(204).send()
+      return reply.code(204).send(null)
     },
   )
 
@@ -328,12 +369,15 @@ export async function leadRoutes(app: FastifyInstance) {
   route.post(
     '/leads/:id/interactions',
     {
+      // Registrar atividade nao mexe no cadastro do lead: vale para os dois
+      // papeis. E o que faz do "user" um perfil util, e nao so leitura.
+      ...loggedIn,
       schema: {
         tags: ['interactions'],
         summary: 'Registra uma interacao na timeline do lead',
         params: idParamSchema,
         body: createInteractionSchema,
-        response: { 201: interactionSchema, 404: apiErrorSchema },
+        response: { 201: interactionSchema, 401: apiErrorSchema, 404: apiErrorSchema },
       },
     },
     async (request, reply) => {

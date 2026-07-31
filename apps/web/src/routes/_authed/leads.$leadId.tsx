@@ -18,9 +18,10 @@ import { Field, Select, Textarea } from '@/components/ui/field'
 import { LeadForm } from '@/features/lead-form'
 import { ApiError } from '@/lib/api'
 import { leadQuery, useAddInteraction, useDeleteLead, useUpdateLead } from '@/lib/queries'
+import { useSession } from '@/lib/session'
 import { formatDate, formatDateTime } from '@/lib/utils'
 
-export const Route = createFileRoute('/leads/$leadId')({
+export const Route = createFileRoute('/_authed/leads/$leadId')({
   component: LeadDetailPage,
 })
 
@@ -38,6 +39,10 @@ function LeadDetailPage() {
   const lead = useQuery(leadQuery(leadId))
   const updateLead = useUpdateLead(leadId)
   const deleteLead = useDeleteLead()
+
+  // Editar e remover sao de admin. Registrar interacao, nao: o formulario da
+  // timeline continua na tela para os dois papeis.
+  const { canManageLeads } = useSession()
 
   const [editing, setEditing] = useState(false)
 
@@ -82,22 +87,24 @@ function LeadDetailPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            Editar
-          </Button>
-          <Button
-            variant="danger"
-            disabled={deleteLead.isPending}
-            onClick={() => {
-              if (!confirm(`Remover o lead "${data.name}"? As interacoes vao junto.`)) return
-              deleteLead.mutate(data.id, { onSuccess: () => navigate({ to: '/leads' }) })
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            Remover
-          </Button>
-        </div>
+        {canManageLeads && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              Editar
+            </Button>
+            <Button
+              variant="danger"
+              disabled={deleteLead.isPending}
+              onClick={() => {
+                if (!confirm(`Remover o lead "${data.name}"? As interacoes vao junto.`)) return
+                deleteLead.mutate(data.id, { onSuccess: () => navigate({ to: '/leads' }) })
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              Remover
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">

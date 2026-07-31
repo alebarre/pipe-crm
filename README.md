@@ -32,6 +32,7 @@ Mude `createLeadSchema` e o TypeScript quebra no formulário. Esse é o ponto.
 |---|---|
 | Runtime | Node 22+ · TypeScript · pnpm workspaces |
 | Backend | Fastify 5 · `fastify-type-provider-zod` · Drizzle ORM · PostgreSQL |
+| Sessão | JWT + refresh rotativo em cookie httpOnly · Argon2id · Nodemailer |
 | Frontend | React 19 · Vite 7 · TanStack Router + Query · Tailwind 4 · React Hook Form |
 | Contrato | Zod 4 em `packages/shared` |
 | Qualidade | Vitest · Biome |
@@ -96,7 +97,51 @@ Os dados ficam em `.pgdata/` na raiz do projeto (ignorado pelo git). Para zerar,
 - API: <http://localhost:3333>
 - OpenAPI (gerado dos schemas Zod): <http://localhost:3333/docs>
 
+O app pede login. O `pnpm db:seed` cria as duas contas (as credenciais saem do `.env`, com estes valores por padrão):
+
+| Conta | Senha | Papel |
+|---|---|---|
+| `admin@pipecrm.local` | `admin12345` | admin |
+| `user@pipecrm.local` | `user12345` | user |
+
 Se a porta 3333 ou 5173 estiver ocupada, o `pnpm dev` falha com `EADDRINUSE` — normalmente é uma instância antiga ainda rodando. Descubra quem está segurando com `ss -ltnp | grep -E ':3333|:5173'`.
+
+---
+
+## Autenticação e papéis
+
+Sessão por **JWT de curta duração + refresh token rotativo**, os dois em cookie `httpOnly`.
+
+```
+POST /auth/login  ──> pipe_at  (JWT, 15 min, path=/)
+                      pipe_rt  (token opaco, 7 dias, path=/api/auth)
+
+401 numa chamada qualquer
+   └─> POST /auth/refresh  ──> rotaciona pipe_rt e emite pipe_at novo
+                               (o client repete a requisição original)
+```
+
+Decisões que valem saber:
+
+- **Cookie `httpOnly`, não `localStorage`.** O JavaScript da página não lê o token, então um XSS não exfiltra a sessão. Dá para fazer assim porque front e API vivem na mesma origem — em dev pelo proxy do Vite, em produção pelo mesmo domínio. `SameSite=Lax` cobre o CSRF sem precisar de token anti-forgery.
+- **Refresh rotativo com detecção de reuso.** Cada uso do refresh emite um novo e revoga o anterior. Se um token já rotacionado reaparecer, a *família* inteira é revogada — o sinal clássico de cookie roubado. No front, um mutex em `lib/api.ts` garante um único refresh em voo; sem ele, três 401 simultâneos disparariam três rotações e o app deslogaria o usuário sozinho.
+- **Só o hash vai para o banco.** Senha em Argon2id; refresh e token de recuperação em SHA-256 (são valores aleatórios, não há o que adivinhar).
+- **Cadastro público nunca cria admin.** O papel não vem do corpo da requisição: `/auth/register` grava `user` fixo, e o primeiro admin nasce do `db:seed`.
+- **Recuperação de senha não revela quem tem conta.** `/auth/forgot-password` responde igual para e-mail existente ou não; o login também usa a mesma mensagem para senha errada e e-mail desconhecido.
+
+### Quem pode o quê
+
+| Rota | admin | user |
+|---|---|---|
+| `GET /api/leads`, `/leads/stats`, `/leads/:id` | ✅ | ✅ |
+| `POST /api/leads/:id/interactions` | ✅ | ✅ |
+| `POST`, `PATCH`, `DELETE` de lead | ✅ | ⛔ 403 |
+
+No front, `_authed.tsx` é uma rota *pathless* que guarda tudo em `routes/_authed/`: o `beforeLoad` consulta `/auth/me` antes de montar a tela e manda para `/login?redirect=...` quem não tem sessão. Os botões de admin somem para o papel `user` — mas isso é UX; a autorização que vale é a do servidor, e existe um teste para cada uma das combinações acima.
+
+### E-mail
+
+`/auth/forgot-password` manda o link por SMTP. Sem `SMTP_USER`/`SMTP_PASSWORD` no `.env`, nada sai pela rede: o e-mail é impresso no log da API, o que basta para desenvolver e é o modo usado nos testes. Com Gmail, `SMTP_PASSWORD` é uma [senha de app](https://myaccount.google.com/apppasswords), não a senha da conta.
 
 ---
 

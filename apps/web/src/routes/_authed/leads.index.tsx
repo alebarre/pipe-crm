@@ -16,9 +16,10 @@ import { Input, Select } from '@/components/ui/field'
 import { LeadForm } from '@/features/lead-form'
 import { ApiError } from '@/lib/api'
 import { leadsQuery, statsQuery, useCreateLead } from '@/lib/queries'
+import { useSession } from '@/lib/session'
 import { relativeDays } from '@/lib/utils'
 
-export const Route = createFileRoute('/leads/')({
+export const Route = createFileRoute('/_authed/leads/')({
   // Os search params da URL sao validados pelo MESMO schema que valida a
   // querystring no Fastify. `search` chega tipado e com os defaults aplicados.
   validateSearch: listLeadsQuerySchema,
@@ -37,6 +38,10 @@ function LeadsPage() {
 
   const leads = useQuery(leadsQuery(search))
   const stats = useQuery(statsQuery())
+
+  // O papel decide o que aparece; a API decide o que acontece. Esconder o
+  // botao e conveniencia — sem `admin`, o POST volta 403 de qualquer jeito.
+  const { canManageLeads } = useSession()
 
   const [creating, setCreating] = useState(false)
   const createLead = useCreateLead()
@@ -64,10 +69,12 @@ function LeadsPage() {
           <h1 className="text-xl font-semibold tracking-tight">Leads</h1>
           <p className="text-sm text-ink-muted">Pipeline comercial</p>
         </div>
-        <Button onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" />
-          Novo lead
-        </Button>
+        {canManageLeads && (
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" />
+            Novo lead
+          </Button>
+        )}
       </div>
 
       {/* Metricas */}

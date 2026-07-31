@@ -1,4 +1,7 @@
+import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
+import jwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
 import sensible from '@fastify/sensible'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
@@ -11,6 +14,8 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod'
 import { env, isDev } from './env.ts'
+import { ACCESS_COOKIE } from './lib/auth.ts'
+import { authRoutes } from './routes/auth.ts'
 import { leadRoutes } from './routes/leads.ts'
 
 export async function buildApp() {
@@ -110,11 +115,33 @@ export async function buildApp() {
     credentials: true,
   })
 
+  await app.register(cookie, { secret: env.COOKIE_SECRET })
+
+  // O access token vive num cookie httpOnly, nao no header Authorization —
+  // por isso o `cookie` aqui. `signed: false` porque a assinatura que importa
+  // e a do proprio JWT; assinar o cookie por cima so gastaria bytes.
+  await app.register(jwt, {
+    secret: env.JWT_SECRET,
+    cookie: { cookieName: ACCESS_COOKIE, signed: false },
+  })
+
+  // `global: false`: o limite vale so onde a rota pedir, via `config.rateLimit`.
+  // Nas rotas de auth, que sao as que da para atacar por forca bruta.
+  await app.register(rateLimit, { global: false })
+
   // Os mesmos schemas viram OpenAPI: /docs
   await app.register(swagger, {
     openapi: {
       info: { title: 'Pipe CRM API', version: '0.1.0' },
       servers: [{ url: `http://localhost:${env.API_PORT}` }],
+      components: {
+        securitySchemes: {
+          // Documental: o /docs manda o cookie sozinho depois que voce faz
+          // login por /auth/login, porque e a mesma origem do navegador.
+          cookieAuth: { type: 'apiKey', in: 'cookie', name: ACCESS_COOKIE },
+        },
+      },
+      security: [{ cookieAuth: [] }],
     },
     transform: jsonSchemaTransform,
   })
@@ -122,6 +149,7 @@ export async function buildApp() {
 
   app.get('/health', { schema: { hide: true } }, async () => ({ status: 'ok' }))
 
+  await app.register(authRoutes, { prefix: '/api' })
   await app.register(leadRoutes, { prefix: '/api' })
 
   return app

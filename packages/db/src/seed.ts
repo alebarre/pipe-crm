@@ -1,6 +1,30 @@
-import type { InteractionType, LeadStatus } from '@pipe/shared'
+import type { InteractionType, LeadStatus, UserRole } from '@pipe/shared'
 import { closeDb, db } from './index.ts'
-import { interactions, leads } from './schema.ts'
+import { hashPassword } from './password.ts'
+import { interactions, leads, users } from './schema.ts'
+
+/**
+ * O primeiro admin nasce aqui, e so aqui: /auth/register cria sempre um
+ * usuario comum. Se o cadastro publico pudesse escolher o papel, qualquer um
+ * viraria administrador do CRM.
+ *
+ * As credenciais saem do .env quando definidas — em producao o seed roda uma
+ * vez com SEED_ADMIN_PASSWORD proprio, nunca com o default abaixo.
+ */
+const SEED_USERS: Array<{ name: string; email: string; password: string; role: UserRole }> = [
+  {
+    name: 'Administrador',
+    email: process.env.SEED_ADMIN_EMAIL ?? 'admin@pipecrm.local',
+    password: process.env.SEED_ADMIN_PASSWORD ?? 'admin12345',
+    role: 'admin',
+  },
+  {
+    name: 'Usuario Demo',
+    email: process.env.SEED_USER_EMAIL ?? 'user@pipecrm.local',
+    password: process.env.SEED_USER_PASSWORD ?? 'user12345',
+    role: 'user',
+  },
+]
 
 type SeedLead = {
   name: string
@@ -123,8 +147,20 @@ const daysAgoToDate = (days: number) => new Date(now - days * MS_PER_DAY)
 
 async function main() {
   console.log('Limpando tabelas...')
-  // interactions cai junto por causa do ON DELETE CASCADE
+  // interactions e os tokens caem junto por causa do ON DELETE CASCADE
   await db.delete(leads)
+  await db.delete(users)
+
+  console.log(`Inserindo ${SEED_USERS.length} usuarios...`)
+  for (const person of SEED_USERS) {
+    await db.insert(users).values({
+      name: person.name,
+      email: person.email,
+      passwordHash: await hashPassword(person.password),
+      role: person.role,
+    })
+    console.log(`  ${person.role.padEnd(5)} ${person.email}`)
+  }
 
   console.log(`Inserindo ${SEED.length} leads...`)
   for (const item of SEED) {
@@ -160,7 +196,9 @@ async function main() {
   }
 
   const totalInteractions = SEED.reduce((acc, l) => acc + l.interactions.length, 0)
-  console.log(`Pronto: ${SEED.length} leads e ${totalInteractions} interacoes.`)
+  console.log(
+    `Pronto: ${SEED_USERS.length} usuarios, ${SEED.length} leads e ${totalInteractions} interacoes.`,
+  )
 }
 
 main()
